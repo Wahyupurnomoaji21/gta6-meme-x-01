@@ -18,11 +18,29 @@
 // stand in for /bot and /output:
 //   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 const botDir = process.env.MAKEFUN_BOT_DIR ?? '/bot';
 const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+const source = join(botDir, 'POST.json');
+
+// POST.json must exist and hold valid JSON before anything is copied.
+let sourceText: string;
+try {
+  sourceText = readFileSync(source, 'utf8');
+} catch (error) {
+  console.error(`POST.json not found in ${botDir}: ${(error as Error).message}`);
+  process.exit(1);
+}
+try {
+  JSON.parse(sourceText);
+} catch (error) {
+  console.error(`POST.json in ${botDir} is not valid JSON: ${(error as Error).message}`);
+  process.exit(1);
+}
 
 mkdirSync(outputDir, { recursive: true });
 
@@ -32,3 +50,14 @@ try {
   console.error(`Could not copy POST.json from ${botDir}: ${(error as Error).message}`);
   process.exit(1);
 }
+
+// The copy must be byte-identical to the source; refuse a silent mismatch.
+const dest = join(outputDir, 'POST.json');
+const sourceBytes = Buffer.from(sourceText, 'utf8');
+const destBytes = readFileSync(dest);
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+if (destBytes.length !== sourceBytes.length || sha256(destBytes) !== sha256(sourceBytes)) {
+  console.error(`POST.json copy mismatch: source ${sourceBytes.length} bytes, output ${destBytes.length} bytes`);
+  process.exit(1);
+}
+console.log(`POST.json copied: ${sourceBytes.length} bytes -> ${destBytes.length} bytes (sha256 ${sha256(destBytes)})`);
